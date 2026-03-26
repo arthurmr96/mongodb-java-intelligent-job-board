@@ -37,6 +37,7 @@ The PDF → auto-fill → review → save → embed pipeline ensures nothing is 
 - Node 20+
 - Docker + Docker Compose
 - A [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) account (free tier works)
+- **MongoDB Atlas Vector Search indexes created for the `candidates` and `jobs` collections** (required for matching/search)
 - An Atlas API key with access to the Embedding and Reranking API
 - An OpenAI API key (or any OpenAI-compatible LLM endpoint)
 
@@ -66,6 +67,8 @@ LLM_API_KEY=your_openai_api_key
 ```
 
 ### 3. Create Atlas Vector Search indexes
+
+> **Required:** Matching relies on Atlas Vector Search. If you don’t create these indexes first, the app cannot run vector similarity queries and matching will fail.
 
 In the Atlas UI, navigate to **Search Indexes → Create Vector Search Index** for each collection.
 
