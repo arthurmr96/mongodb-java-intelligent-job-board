@@ -97,10 +97,18 @@ docker-compose up --build
 
 Open [http://localhost](http://localhost) in your browser.
 
-### 5. Seed sample job postings (optional)
+### 5. Seed sample candidates and job postings (optional)
 
 ```bash
+node scripts/seed_candidates.js
 node scripts/seed_jobs.js
+```
+
+Both seeders generate `200` records by default and accept overrides:
+
+```bash
+node scripts/seed_candidates.js --count 50 --api-url http://localhost:8080
+node scripts/seed_jobs.js --count 75 --api-url http://localhost:8080
 ```
 
 ---
@@ -175,7 +183,9 @@ intelligent-job-matching/
 │   │   └── api/client.js
 │   └── vite.config.js
 ├── scripts/
+│   ├── seed_candidates.js
 │   ├── seed_jobs.js
+│   ├── seed_utils.js
 │   └── reembed.js
 ├── docker-compose.yml
 ├── .env.example
