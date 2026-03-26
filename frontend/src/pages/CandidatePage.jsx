@@ -1,8 +1,8 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import PdfUploadZone from '../components/PdfUploadZone';
 import CandidateReviewForm from '../components/CandidateReviewForm';
-import MatchCard from '../components/MatchCard';
-import { parseCvPdf, saveCandidate, getMatchesForCandidate } from '../api/client';
+import { parseCvPdf, saveCandidate } from '../api/client';
 
 /**
  * CandidatePage
@@ -26,14 +26,13 @@ const CV_REQUIRED_SECTIONS = [
 ];
 
 // Step identifiers
-const STEP = { UPLOAD: 'upload', REVIEW: 'review', MATCHES: 'matches' };
+const STEP = { UPLOAD: 'upload', REVIEW: 'review' };
 
 export default function CandidatePage() {
+  const navigate = useNavigate();
   const [step, setStep] = useState(STEP.UPLOAD);
   const [extractedProfile, setExtractedProfile] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [savedCandidate, setSavedCandidate] = useState(null);
-  const [matches, setMatches] = useState([]);
   const [matchError, setMatchError] = useState(null);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
@@ -53,12 +52,7 @@ export default function CandidatePage() {
     setMatchError(null);
     try {
       const candidate = await saveCandidate(formData);
-      setSavedCandidate(candidate);
-
-      // Fetch matches using the returned candidate id
-      const results = await getMatchesForCandidate(candidate.id);
-      setMatches(results);
-      setStep(STEP.MATCHES);
+      navigate(`/candidate/${candidate.id}/matches`);
     } catch (err) {
       setMatchError(err.message ?? 'Something went wrong. Please try again.');
     } finally {
@@ -69,8 +63,6 @@ export default function CandidatePage() {
   function handleReset() {
     setStep(STEP.UPLOAD);
     setExtractedProfile(null);
-    setSavedCandidate(null);
-    setMatches([]);
     setMatchError(null);
   }
 
@@ -144,50 +136,6 @@ export default function CandidatePage() {
         </div>
       )}
 
-      {/* ── Step 3: Match results ── */}
-      {step === STEP.MATCHES && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-800">
-                Your top job matches
-              </h2>
-              <p className="text-sm text-gray-500">
-                Ranked by AI semantic match + skill overlap for{' '}
-                <strong>{savedCandidate?.name}</strong>
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleReset}
-              className="text-xs text-gray-400 hover:text-gray-600"
-            >
-              ← New profile
-            </button>
-          </div>
-
-          {matches.length === 0 ? (
-            <p className="text-sm text-gray-500 italic">
-              No matching jobs found yet. Ask a recruiter to publish job postings!
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {matches.map((match, i) => (
-                <MatchCard
-                  key={i}
-                  title={match.jobTitle}
-                  company={match.company}
-                  compositeScore={match.compositeScore}
-                  vectorScore={match.vectorScore}
-                  skillScore={match.skillOverlapScore}
-                  matchedSkills={match.matchedSkills}
-                  missingSkills={match.missingSkills}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -198,7 +146,6 @@ function StepBar({ current }) {
   const steps = [
     { key: STEP.UPLOAD,  label: 'Upload CV' },
     { key: STEP.REVIEW,  label: 'Review' },
-    { key: STEP.MATCHES, label: 'Matches' },
   ];
 
   const currentIndex = steps.findIndex((s) => s.key === current);

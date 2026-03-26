@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import CandidatePage from './pages/CandidatePage';
 import RecruiterPage from './pages/RecruiterPage';
+import CandidateMatchesPage from './pages/CandidateMatchesPage';
+import JobMatchesPage from './pages/JobMatchesPage';
 
 /**
  * App
@@ -9,8 +11,6 @@ import RecruiterPage from './pages/RecruiterPage';
  * Recruiter portals. In a production app you would use React Router instead.
  */
 export default function App() {
-  const [tab, setTab] = useState('candidate');
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Top navigation bar */}
@@ -26,27 +26,38 @@ export default function App() {
 
           {/* Tabs */}
           {[
-            { key: 'candidate', label: '👤 I\'m a Candidate' },
-            { key: 'recruiter', label: '🏢 I\'m a Recruiter' },
-          ].map(({ key, label }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors
-                ${tab === key
-                  ? 'bg-green-100 text-green-800'
-                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
-                }`}
+            { to: '/candidate', label: '👤 I\'m a Candidate' },
+            { to: '/recruiter', label: '🏢 I\'m a Recruiter' },
+          ].map(({ to, label }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) =>
+                `px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'bg-green-100 text-green-800'
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                }`
+              }
+              end
             >
               {label}
-            </button>
+            </NavLink>
           ))}
         </div>
       </nav>
 
       {/* Page content */}
-      {tab === 'candidate' ? <CandidatePage /> : <RecruiterPage />}
+      <Routes>
+        <Route path="/" element={<Navigate to="/candidate" replace />} />
+        <Route path="/candidate" element={<CandidatePage />} />
+        <Route path="/recruiter" element={<RecruiterPage />} />
+
+        <Route path="/candidate/:candidateId/matches" element={<CandidateMatchesPage />} />
+        <Route path="/job/:jobId/matches" element={<JobMatchesPage />} />
+
+        <Route path="*" element={<Navigate to="/candidate" replace />} />
+      </Routes>
 
       {/* Footer */}
       <footer className="text-center text-xs text-gray-400 py-6 mt-8">
