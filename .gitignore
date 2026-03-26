@@ -1,0 +1,32 @@
+# Environment variables (keep .env.example)
+.env
+.env.*
+!.env.example
+
+# Backend (Maven / Spring Boot)
+backend/target/
+backend/*.log
+
+# Frontend (Node / Vite)
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/coverage/
+frontend/.vite/
+frontend/.eslintcache
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS / misc
+.DS_Store
+Thumbs.db
+*.class
+*.jar
+*.war
+*.ear
+*.swp
+*.swo
+
