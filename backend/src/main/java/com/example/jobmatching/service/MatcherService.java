@@ -277,8 +277,8 @@ public class MatcherService {
             String jobId = job.getObjectId("_id").toHexString();
 
             Document result = new Document()
-                    .append("candidateId", new ObjectId(candidateId))
-                    .append("jobId", new ObjectId(jobId))
+                    .append("candidateId", candidateId)
+                    .append("jobId", jobId)
                     .append("jobTitle", job.getString("title"))
                     .append("company", job.getString("company"))
                     .append("vectorScore", vectorScore)
@@ -344,8 +344,8 @@ public class MatcherService {
             String candidateId = candidate.getObjectId("_id").toHexString();
 
             Document result = new Document()
-                    .append("candidateId", new ObjectId(candidateId))
-                    .append("jobId", new ObjectId(jobId))
+                    .append("candidateId", candidateId)
+                    .append("jobId", jobId)
                     .append("candidateName", candidate.getString("name"))
                     .append("candidateEmail", candidate.getString("email"))
                     .append("vectorScore", vectorScore)

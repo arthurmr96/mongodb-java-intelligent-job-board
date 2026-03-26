@@ -13,12 +13,16 @@ export default function MatchCardSkeleton({ variant = 'job' } = {}) {
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className={`h-4 ${topLineWidth} bg-gray-200 rounded`} />
-          <div className={`h-3 ${subLineWidth} bg-gray-200 rounded mt-2`} />
+          <h3 className="font-semibold text-gray-900 text-sm leading-tight">
+            <span className={`inline-block h-4 ${topLineWidth} bg-gray-200 rounded`} />
+          </h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            <span className={`inline-block h-3 ${subLineWidth} bg-gray-200 rounded`} />
+          </p>
         </div>
 
         {/* Composite score badge */}
-        <div className="shrink-0 h-6 w-12 rounded-full bg-gray-200" />
+        <span className="shrink-0 h-6 w-12 rounded-full bg-gray-200" />
       </div>
 
       {/* Score bar */}
@@ -27,20 +31,20 @@ export default function MatchCardSkeleton({ variant = 'job' } = {}) {
       </div>
 
       {/* Score breakdown */}
-      <div className="flex gap-4">
-        <div className="h-3 w-24 bg-gray-200 rounded" />
-        <div className="h-3 w-20 bg-gray-200 rounded" />
+      <div className="flex gap-4 text-xs text-gray-500">
+        <span className="inline-block h-3 w-24 bg-gray-200 rounded" />
+        <span className="inline-block h-3 w-20 bg-gray-200 rounded" />
       </div>
 
       {/* Skill pills */}
       <div className="space-y-2">
         <div className="flex flex-wrap gap-1">
-          {Array.from({ length: 5 }).map((_, i) => (
+          {Array.from({ length: variant === 'job' ? 6 : 5 }).map((_, i) => (
             <div key={i} className="h-5 w-16 rounded-full bg-gray-200" />
           ))}
         </div>
         <div className="flex flex-wrap gap-1">
-          {Array.from({ length: 3 }).map((_, i) => (
+          {Array.from({ length: variant === 'job' ? 3 : 4 }).map((_, i) => (
             <div key={i} className="h-5 w-14 rounded-full bg-gray-200" />
           ))}
         </div>

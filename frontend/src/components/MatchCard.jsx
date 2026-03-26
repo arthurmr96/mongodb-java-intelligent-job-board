@@ -9,16 +9,18 @@ import SkillBadge from './SkillBadge';
  * Props (candidate → job direction):
  *   title          string   job title
  *   company        string   company name
+ *
+ * Props (job → candidate direction):
+ *   name           string   candidate name
+ *   email          string   candidate email
+ *
+ * Common props:
  *   compositeScore number   0–1 weighted score
  *   vectorScore    number   raw vector similarity
  *   skillScore     number   fraction of required skills matched
  *   matchedSkills  string[] skills the candidate has
  *   missingSkills  string[] required skills the candidate lacks
- *
- * Props (job → candidate direction):
- *   name           string   candidate name
- *   email          string   candidate email
- *   + same score/skill fields
+ *   onClick        fn       optional — opens detail modal when provided
  */
 export default function MatchCard({
   // Job fields (candidate → job view)
@@ -34,6 +36,8 @@ export default function MatchCard({
   // Skill breakdown
   matchedSkills = [],
   missingSkills = [],
+  // Interaction
+  onClick,
 }) {
   const scorePercent = Math.round(compositeScore * 100);
   const barColor =
@@ -41,26 +45,59 @@ export default function MatchCard({
     scorePercent >= 50 ? 'bg-yellow-400' :
                          'bg-red-400';
 
+  const isClickable = typeof onClick === 'function';
+
   return (
-    <div className="border border-gray-200 rounded-xl p-4 shadow-sm bg-white space-y-3">
+    <div
+      className={`
+        border border-gray-200 rounded-xl p-4 shadow-sm bg-white space-y-3
+        transition-all duration-150
+        ${isClickable
+          ? 'cursor-pointer hover:shadow-md hover:border-gray-300 hover:-translate-y-0.5 active:translate-y-0 active:shadow-sm'
+          : ''}
+      `}
+      onClick={isClickable ? onClick : undefined}
+      role={isClickable ? 'button' : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onKeyDown={isClickable
+        ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }
+        : undefined}
+      aria-label={isClickable ? `View details for ${title ?? name}` : undefined}
+    >
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
-        <div>
-          <h3 className="font-semibold text-gray-900 text-sm leading-tight">
+        <div className="min-w-0">
+          <h3 className="font-semibold text-gray-900 text-sm leading-tight truncate">
             {title ?? name ?? '—'}
           </h3>
           {(company || email) && (
-            <p className="text-xs text-gray-500 mt-0.5">{company ?? email}</p>
+            <p className="text-xs text-gray-500 mt-0.5 truncate">{company ?? email}</p>
           )}
         </div>
 
-        {/* Composite score badge */}
-        <span
-          className={`shrink-0 text-sm font-bold px-2 py-0.5 rounded-full text-white ${barColor}`}
-          title="Composite match score"
-        >
-          {scorePercent}%
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Composite score badge */}
+          <span
+            className={`text-sm font-bold px-2 py-0.5 rounded-full text-white ${barColor}`}
+            title="Composite match score"
+          >
+            {scorePercent}%
+          </span>
+          {/* Chevron hint when clickable */}
+          {isClickable && (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-4 w-4 text-gray-300"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          )}
+        </div>
       </div>
 
       {/* Score bar */}

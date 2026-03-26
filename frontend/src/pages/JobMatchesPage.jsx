@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import MatchCard from '../components/MatchCard';
 import MatchCardSkeleton from '../components/MatchCardSkeleton';
+import CandidateDetailModal from '../components/CandidateDetailModal';
 import { getJob, getMatchesForJob } from '../api/client';
 
 export default function JobMatchesPage() {
@@ -11,6 +12,7 @@ export default function JobMatchesPage() {
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedMatch, setSelectedMatch] = useState(null);
 
   const skeletonCount = useMemo(() => 5, []);
 
@@ -48,20 +50,40 @@ export default function JobMatchesPage() {
     <div className="max-w-2xl mx-auto px-4 py-10 space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold text-gray-900">Top candidate matches</h1>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {loading ? (
+              <span className="inline-block h-7 w-56 sm:w-72 bg-gray-200 rounded animate-pulse align-middle" />
+            ) : (
+              'Top candidate matches'
+            )}
+          </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Ranked by AI semantic match + skill overlap for{' '}
-            <strong>{loading ? '…' : (job?.title ?? '—')}</strong>
-            {` `}at{' '}
-            <strong>{loading ? '…' : (job?.company ?? '—')}</strong>
+            {loading ? (
+              <span className="inline-block h-4 w-80 sm:w-[30rem] bg-gray-200 rounded animate-pulse align-middle" />
+            ) : (
+              <>
+                Ranked by AI semantic match + skill overlap for{' '}
+                <strong>{job?.title ?? '—'}</strong>
+                {` `}at{' '}
+                <strong>{job?.company ?? '—'}</strong>
+              </>
+            )}
           </p>
         </div>
 
         <Link
           to="/recruiter"
-          className="text-xs text-gray-400 hover:text-gray-600 w-fit"
+          className={`text-xs w-fit ${
+            loading
+              ? 'text-transparent pointer-events-none select-none'
+              : 'text-gray-400 hover:text-gray-600'
+          }`}
         >
-          ← New posting
+          {loading ? (
+            <span className="inline-block h-4 w-24 bg-gray-200 rounded animate-pulse align-middle" />
+          ) : (
+            '← New posting'
+          )}
         </Link>
       </div>
 
@@ -93,10 +115,16 @@ export default function JobMatchesPage() {
               skillScore={match.skillOverlapScore}
               matchedSkills={match.matchedSkills}
               missingSkills={match.missingSkills}
+              onClick={() => setSelectedMatch(match)}
             />
           ))}
         </div>
       )}
+
+      <CandidateDetailModal
+        match={selectedMatch}
+        onClose={() => setSelectedMatch(null)}
+      />
     </div>
   );
 }
