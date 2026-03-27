@@ -1,5 +1,6 @@
 package com.example.jobmatching.service;
 
+import com.example.jobmatching.config.MongoSchemaConstants;
 import com.example.jobmatching.model.MatchCursor;
 import com.example.jobmatching.model.MatchPage;
 import com.mongodb.client.MongoCollection;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -48,6 +50,18 @@ import java.util.stream.Collectors;
 @Service
 public class MatcherService {
     private static final int MAX_PAGE_SIZE = 50;
+    private static final Pattern NON_SKILL_TEXT = Pattern.compile("[^a-z0-9.+#/\\-\\s]");
+    private static final Pattern MULTIPLE_SPACES = Pattern.compile("\\s+");
+    private static final Map<String, String> SKILL_ALIASES = Map.ofEntries(
+            Map.entry("restful apis", "rest apis"),
+            Map.entry("rest api", "rest apis"),
+            Map.entry("graphql apis", "graphql"),
+            Map.entry("google cloud platform", "gcp"),
+            Map.entry("google cloud platform gcp", "gcp"),
+            Map.entry("k8s", "kubernetes"),
+            Map.entry("js", "javascript"),
+            Map.entry("node", "node.js")
+    );
 
     // Composite score weights — must sum to 1.0
     private static final double VECTOR_WEIGHT = 0.7;
@@ -116,16 +130,12 @@ public class MatcherService {
         // 3. Run $vectorSearch against jobs collection
         int maxResults = safeCount(jobsCollection);
         List<Document> vectorResults = runVectorSearch(
-                jobsCollection, queryVector, "jobs_vector_index", maxResults);
+                jobsCollection, queryVector, MongoSchemaConstants.JOBS_VECTOR_INDEX, maxResults);
 
         // 4. Extract candidate skills for overlap scoring
         @SuppressWarnings("unchecked")
         List<Document> candidateSkillDocs = (List<Document>) candidate.getOrDefault("skills", List.of());
-        Set<String> candidateSkillNames = candidateSkillDocs.stream()
-                .map(s -> s.getString("name"))
-                .filter(Objects::nonNull)
-                .map(String::toLowerCase)
-                .collect(Collectors.toSet());
+        Set<String> candidateSkillNames = normalizedSkillNames(candidateSkillDocs);
 
         List<Document> matches = scoreAndRankJobResults(
                 vectorResults, candidateSkillNames, candidateId);
@@ -175,19 +185,15 @@ public class MatcherService {
         // 3. Run $vectorSearch against candidates collection
         int maxResults = safeCount(candidatesCollection);
         List<Document> vectorResults = runVectorSearch(
-                candidatesCollection, queryVector, "candidates_vector_index", maxResults);
+                candidatesCollection, queryVector, MongoSchemaConstants.CANDIDATES_VECTOR_INDEX, maxResults);
 
         // 4. Extract required skills from the job
         @SuppressWarnings("unchecked")
         List<Document> requiredSkillDocs = (List<Document>) job.getOrDefault("requiredSkills", List.of());
-        Set<String> requiredSkillNames = requiredSkillDocs.stream()
-                .map(s -> s.getString("name"))
-                .filter(Objects::nonNull)
-                .map(String::toLowerCase)
-                .collect(Collectors.toSet());
+        Set<String> requiredSkillNames = normalizedSkillNames(requiredSkillDocs);
 
         List<Document> matches = scoreAndRankCandidateResults(
-                vectorResults, requiredSkillNames, jobId);
+                vectorResults, requiredSkillDocs, requiredSkillNames, jobId);
 
         saveMatchesForJob(jobId, matches);
         return readJobMatchPage(jobId, pageSize, cursor);
@@ -263,19 +269,16 @@ public class MatcherService {
             @SuppressWarnings("unchecked")
             List<Document> requiredSkillDocs = (List<Document>) job.getOrDefault("requiredSkills", List.of());
 
-            Set<String> requiredNames = requiredSkillDocs.stream()
-                    .map(s -> s.getString("name"))
-                    .filter(Objects::nonNull)
-                    .map(String::toLowerCase)
-                    .collect(Collectors.toSet());
+            Set<String> requiredNames = normalizedSkillNames(requiredSkillDocs);
 
             List<String> matched = new ArrayList<>();
             List<String> missing = new ArrayList<>();
 
             for (Document req : requiredSkillDocs) {
                 String name = req.getString("name");
-                if (name == null) continue;
-                if (candidateSkillNames.contains(name.toLowerCase())) {
+                String normalizedName = normalizeSkillName(name);
+                if (normalizedName == null) continue;
+                if (candidateSkillNames.contains(normalizedName)) {
                     matched.add(name);
                 } else {
                     missing.add(name);
@@ -318,33 +321,31 @@ public class MatcherService {
      */
     private List<Document> scoreAndRankCandidateResults(
             List<Document> candidateResults,
+            List<Document> requiredSkillDocs,
             Set<String> requiredSkillNames,
             String jobId) {
 
         List<Document> scored = new ArrayList<>();
+        Map<String, String> requiredSkillDisplayNames = displayNamesByNormalizedSkill(requiredSkillDocs);
 
         for (Document candidate : candidateResults) {
             @SuppressWarnings("unchecked")
             List<Document> skillDocs = (List<Document>) candidate.getOrDefault("skills", List.of());
 
-            Set<String> candidateSkillNames = skillDocs.stream()
-                    .map(s -> s.getString("name"))
-                    .filter(Objects::nonNull)
-                    .map(String::toLowerCase)
-                    .collect(Collectors.toSet());
+            Set<String> candidateSkillNames = normalizedSkillNames(skillDocs);
+            Map<String, String> candidateSkillDisplayNames = displayNamesByNormalizedSkill(skillDocs);
 
             List<String> matched = new ArrayList<>();
             List<String> missing = new ArrayList<>();
 
             for (String req : requiredSkillNames) {
                 if (candidateSkillNames.contains(req)) {
-                    // Find the original-case skill name for display
-                    skillDocs.stream()
-                            .filter(s -> req.equalsIgnoreCase(s.getString("name")))
-                            .findFirst()
-                            .ifPresent(s -> matched.add(s.getString("name")));
+                    String displayName = candidateSkillDisplayNames.get(req);
+                    if (displayName != null) {
+                        matched.add(displayName);
+                    }
                 } else {
-                    missing.add(req);
+                    missing.add(requiredSkillDisplayNames.getOrDefault(req, req));
                 }
             }
 
@@ -428,20 +429,24 @@ public class MatcherService {
         }
 
         Bson query = filters.size() == 1 ? filters.getFirst() : Filters.and(filters);
-        List<Document> items = new ArrayList<>();
+        List<Document> fetched = new ArrayList<>();
         matchesCollection.find(query)
                 .sort(Sorts.orderBy(
                         Sorts.descending("compositeScore"),
                         Sorts.ascending("_id")))
                 .limit(limit + 1)
-                .forEach(doc -> items.add(toResponseDocument(doc)));
+                .forEach(doc -> fetched.add(toResponseDocument(doc)));
 
         MatchCursor nextCursor = null;
-        if (items.size() > limit) {
-            Document lastVisible = items.get(limit - 1);
+        List<Document> items;
+        if (fetched.size() > limit) {
+            Document lastVisible = fetched.get(limit - 1);
             nextCursor = new MatchCursor(lastVisible.getDouble("compositeScore"), lastVisible.getString("id"));
-            items = new ArrayList<>(items.subList(0, limit));
+            items = new ArrayList<>(fetched.subList(0, limit));
+        } else {
+            items = fetched;
         }
+
         if (items.isEmpty()) {
             return new MatchPage(items, null);
         }
@@ -489,6 +494,46 @@ public class MatcherService {
 
     private static double compositeScoreOf(Document doc) {
         return doc.getDouble("compositeScore") != null ? doc.getDouble("compositeScore") : 0.0;
+    }
+
+    static String normalizeSkillName(String raw) {
+        if (raw == null) {
+            return null;
+        }
+
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty()) {
+            return null;
+        }
+
+        normalized = normalized.replace('(', ' ').replace(')', ' ');
+        normalized = NON_SKILL_TEXT.matcher(normalized).replaceAll(" ");
+        normalized = MULTIPLE_SPACES.matcher(normalized).replaceAll(" ").trim();
+
+        if (normalized.isEmpty()) {
+            return null;
+        }
+
+        return SKILL_ALIASES.getOrDefault(normalized, normalized);
+    }
+
+    private static Set<String> normalizedSkillNames(List<Document> skillDocs) {
+        return skillDocs.stream()
+                .map(s -> normalizeSkillName(s.getString("name")))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private static Map<String, String> displayNamesByNormalizedSkill(List<Document> skillDocs) {
+        Map<String, String> displayNames = new LinkedHashMap<>();
+        for (Document skillDoc : skillDocs) {
+            String originalName = skillDoc.getString("name");
+            String normalizedName = normalizeSkillName(originalName);
+            if (normalizedName != null && originalName != null) {
+                displayNames.putIfAbsent(normalizedName, originalName);
+            }
+        }
+        return displayNames;
     }
 
     private int safeCount(MongoCollection<Document> collection) {

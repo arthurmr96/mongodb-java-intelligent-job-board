@@ -6,7 +6,6 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
-import com.mongodb.client.model.Indexes;
 import org.bson.Document;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -58,7 +57,7 @@ public class MongoConfig {
      */
     @Bean
     public MongoCollection<Document> candidatesCollection(MongoDatabase db) {
-        return db.getCollection("candidates");
+        return db.getCollection(MongoSchemaConstants.CANDIDATES_COLLECTION);
     }
 
     /**
@@ -68,7 +67,7 @@ public class MongoConfig {
      */
     @Bean
     public MongoCollection<Document> jobsCollection(MongoDatabase db) {
-        return db.getCollection("jobs");
+        return db.getCollection(MongoSchemaConstants.JOBS_COLLECTION);
     }
 
     /**
@@ -78,15 +77,6 @@ public class MongoConfig {
      */
     @Bean
     public MongoCollection<Document> matchesCollection(MongoDatabase db) {
-        MongoCollection<Document> collection = db.getCollection("matches");
-        collection.createIndex(Indexes.compoundIndex(
-                Indexes.ascending("candidateId"),
-                Indexes.descending("compositeScore"),
-                Indexes.ascending("_id")));
-        collection.createIndex(Indexes.compoundIndex(
-                Indexes.ascending("jobId"),
-                Indexes.descending("compositeScore"),
-                Indexes.ascending("_id")));
-        return collection;
+        return db.getCollection(MongoSchemaConstants.MATCHES_COLLECTION);
     }
 }
