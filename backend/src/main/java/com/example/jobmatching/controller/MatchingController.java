@@ -1,12 +1,12 @@
 package com.example.jobmatching.controller;
 
+import com.example.jobmatching.model.MatchPage;
 import com.example.jobmatching.service.MatcherService;
 import org.bson.Document;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -60,12 +60,16 @@ public class MatchingController {
      * </ul>
      *
      * @param candidateId hex ObjectId string of the candidate
-     * @return ranked list of job match results
+     * @return paginated job match results
      */
     @GetMapping("/candidate/{candidateId}")
-    public ResponseEntity<?> matchForCandidate(@PathVariable String candidateId) {
+    public ResponseEntity<?> matchForCandidate(
+            @PathVariable String candidateId,
+            @RequestParam(defaultValue = "10") int limit,
+            @RequestParam(required = false) Double afterScore,
+            @RequestParam(required = false) String afterId) {
         try {
-            List<Document> matches = matcherService.findMatchingJobs(candidateId);
+            MatchPage matches = matcherService.findMatchingJobs(candidateId, limit, afterScore, afterId);
             return ResponseEntity.ok(matches);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest()
@@ -94,12 +98,16 @@ public class MatchingController {
      * </ul>
      *
      * @param jobId hex ObjectId string of the job posting
-     * @return ranked list of candidate match results
+     * @return paginated candidate match results
      */
     @GetMapping("/job/{jobId}")
-    public ResponseEntity<?> matchForJob(@PathVariable String jobId) {
+    public ResponseEntity<?> matchForJob(
+            @PathVariable String jobId,
+            @RequestParam(defaultValue = "10") int limit,
+            @RequestParam(required = false) Double afterScore,
+            @RequestParam(required = false) String afterId) {
         try {
-            List<Document> matches = matcherService.findMatchingCandidates(jobId);
+            MatchPage matches = matcherService.findMatchingCandidates(jobId, limit, afterScore, afterId);
             return ResponseEntity.ok(matches);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest()

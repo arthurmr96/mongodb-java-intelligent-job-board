@@ -1,11 +1,13 @@
 package com.example.jobmatching.service;
 
-import com.example.jobmatching.model.RequiredSkill;
-import com.example.jobmatching.model.Skill;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.jobmatching.model.MatchCursor;
+import com.example.jobmatching.model.MatchPage;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Sorts;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 import org.springframework.stereotype.Service;
 
@@ -45,29 +47,23 @@ import java.util.stream.Collectors;
  */
 @Service
 public class MatcherService {
+    private static final int MAX_PAGE_SIZE = 50;
 
     // Composite score weights — must sum to 1.0
     private static final double VECTOR_WEIGHT = 0.7;
     private static final double SKILL_WEIGHT  = 0.3;
 
-    // Number of candidates / jobs to retrieve from vector search
-    private static final int NUM_CANDIDATES = 10;
-
     private final MongoCollection<Document> candidatesCollection;
     private final MongoCollection<Document> jobsCollection;
     private final MongoCollection<Document> matchesCollection;
-    private final EmbedderService embedderService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public MatcherService(
             MongoCollection<Document> candidatesCollection,
             MongoCollection<Document> jobsCollection,
-            MongoCollection<Document> matchesCollection,
-            EmbedderService embedderService) {
+            MongoCollection<Document> matchesCollection) {
         this.candidatesCollection = candidatesCollection;
         this.jobsCollection = jobsCollection;
         this.matchesCollection = matchesCollection;
-        this.embedderService = embedderService;
     }
 
     // ── Public API ─────────────────────────────────────────────────────────
@@ -85,16 +81,26 @@ public class MatcherService {
      * @throws IOException          if the embedder or MongoDB call fails
      * @throws InterruptedException if interrupted during embedding
      */
-    public List<Document> findMatchingJobs(String candidateId)
+    public MatchPage findMatchingJobs(
+            String candidateId,
+            int limit,
+            Double afterScore,
+            String afterId)
             throws IOException, InterruptedException {
+        int pageSize = validatePageSize(limit);
+        ObjectId candidateObjectId = parseObjectId(candidateId, "candidateId");
+        CursorState cursor = validateCursor(afterScore, afterId);
 
-        // 1. Fetch candidate document
         Document candidate = candidatesCollection
-                .find(new Document("_id", new ObjectId(candidateId)))
+                .find(new Document("_id", candidateObjectId))
                 .first();
 
         if (candidate == null) {
             throw new IllegalArgumentException("Candidate not found: " + candidateId);
+        }
+
+        if (cursor != null) {
+            return readCandidateMatchPage(candidateId, pageSize, cursor);
         }
 
         // 2. Use the stored embedding — no re-embedding needed
@@ -108,7 +114,9 @@ public class MatcherService {
         }
 
         // 3. Run $vectorSearch against jobs collection
-        List<Document> vectorResults = runVectorSearch(jobsCollection, queryVector, "jobs_vector_index");
+        int maxResults = safeCount(jobsCollection);
+        List<Document> vectorResults = runVectorSearch(
+                jobsCollection, queryVector, "jobs_vector_index", maxResults);
 
         // 4. Extract candidate skills for overlap scoring
         @SuppressWarnings("unchecked")
@@ -119,14 +127,11 @@ public class MatcherService {
                 .map(String::toLowerCase)
                 .collect(Collectors.toSet());
 
-        // 5. Score and rank results
         List<Document> matches = scoreAndRankJobResults(
                 vectorResults, candidateSkillNames, candidateId);
 
-        // 6. Cache results in the matches collection
-        cacheMatches(matches);
-
-        return matches;
+        saveMatchesForCandidate(candidateId, matches);
+        return readCandidateMatchPage(candidateId, pageSize, cursor);
     }
 
     /**
@@ -135,16 +140,26 @@ public class MatcherService {
      * @param jobId the hex ObjectId string of the job document
      * @return ranked list of match result documents, ordered by compositeScore descending
      */
-    public List<Document> findMatchingCandidates(String jobId)
+    public MatchPage findMatchingCandidates(
+            String jobId,
+            int limit,
+            Double afterScore,
+            String afterId)
             throws IOException, InterruptedException {
+        int pageSize = validatePageSize(limit);
+        ObjectId jobObjectId = parseObjectId(jobId, "jobId");
+        CursorState cursor = validateCursor(afterScore, afterId);
 
-        // 1. Fetch job document
         Document job = jobsCollection
-                .find(new Document("_id", new ObjectId(jobId)))
+                .find(new Document("_id", jobObjectId))
                 .first();
 
         if (job == null) {
             throw new IllegalArgumentException("Job not found: " + jobId);
+        }
+
+        if (cursor != null) {
+            return readJobMatchPage(jobId, pageSize, cursor);
         }
 
         // 2. Use the stored embedding
@@ -158,8 +173,9 @@ public class MatcherService {
         }
 
         // 3. Run $vectorSearch against candidates collection
+        int maxResults = safeCount(candidatesCollection);
         List<Document> vectorResults = runVectorSearch(
-                candidatesCollection, queryVector, "candidates_vector_index");
+                candidatesCollection, queryVector, "candidates_vector_index", maxResults);
 
         // 4. Extract required skills from the job
         @SuppressWarnings("unchecked")
@@ -170,14 +186,11 @@ public class MatcherService {
                 .map(String::toLowerCase)
                 .collect(Collectors.toSet());
 
-        // 5. Score and rank results
         List<Document> matches = scoreAndRankCandidateResults(
                 vectorResults, requiredSkillNames, jobId);
 
-        // 6. Cache results
-        cacheMatches(matches);
-
-        return matches;
+        saveMatchesForJob(jobId, matches);
+        return readJobMatchPage(jobId, pageSize, cursor);
     }
 
     // ── $vectorSearch ──────────────────────────────────────────────────────
@@ -204,15 +217,19 @@ public class MatcherService {
     private List<Document> runVectorSearch(
             MongoCollection<Document> collection,
             List<Double> queryVector,
-            String indexName) {
+            String indexName,
+            int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
 
         // $vectorSearch stage — see Atlas docs for field definitions
         Document vectorSearchStage = new Document("$vectorSearch", new Document()
                 .append("index", indexName)
                 .append("path", "embedding")
                 .append("queryVector", queryVector)
-                .append("numCandidates", NUM_CANDIDATES * 10) // oversample for better recall
-                .append("limit", NUM_CANDIDATES));
+                .append("numCandidates", Math.max(limit * 10, limit))
+                .append("limit", limit));
 
         // Promote the vector score into a top-level field
         Document addFieldsStage = new Document("$addFields", new Document(
@@ -291,8 +308,7 @@ public class MatcherService {
             scored.add(result);
         }
 
-        scored.sort(Comparator.comparingDouble(
-                d -> -((Document) d).getDouble("compositeScore")));
+        scored.sort(MATCH_RESULT_ORDER);
         return scored;
     }
 
@@ -358,27 +374,131 @@ public class MatcherService {
             scored.add(result);
         }
 
-        scored.sort(Comparator.comparingDouble(
-                d -> -((Document) d).getDouble("compositeScore")));
+        scored.sort(MATCH_RESULT_ORDER);
         return scored;
     }
 
-    // ── Cache ──────────────────────────────────────────────────────────────
+    // ── Persistence ────────────────────────────────────────────────────────
+
+    private static final Comparator<Document> MATCH_RESULT_ORDER =
+            Comparator.comparingDouble(MatcherService::compositeScoreOf)
+                    .reversed()
+                    .thenComparing(doc -> doc.getString("jobId"), Comparator.nullsLast(String::compareTo))
+                    .thenComparing(doc -> doc.getString("candidateId"), Comparator.nullsLast(String::compareTo));
 
     /**
-     * Persists match results to the {@code matches} collection.
-     * Existing matches for the same candidate/job pair are replaced (upsert).
+     * Replaces all stored matches for a candidate with the freshly computed set.
+     * Deletes the previous results first so stale entries from removed jobs are cleaned up.
      */
-    private void cacheMatches(List<Document> matches) {
-        for (Document match : matches) {
-            Document filter = new Document()
-                    .append("candidateId", match.get("candidateId"))
-                    .append("jobId", match.get("jobId"));
-
-            matchesCollection.replaceOne(
-                    filter,
-                    match,
-                    new com.mongodb.client.model.ReplaceOptions().upsert(true));
+    private void saveMatchesForCandidate(String candidateId, List<Document> matches) {
+        matchesCollection.deleteMany(Filters.eq("candidateId", candidateId));
+        if (!matches.isEmpty()) {
+            matchesCollection.insertMany(matches);
         }
+    }
+
+    /**
+     * Replaces all stored matches for a job with the freshly computed set.
+     * Deletes the previous results first so stale entries from removed candidates are cleaned up.
+     */
+    private void saveMatchesForJob(String jobId, List<Document> matches) {
+        matchesCollection.deleteMany(Filters.eq("jobId", jobId));
+        if (!matches.isEmpty()) {
+            matchesCollection.insertMany(matches);
+        }
+    }
+
+    private MatchPage readCandidateMatchPage(String candidateId, int limit, CursorState cursor) {
+        return readMatchPage(Filters.eq("candidateId", candidateId), limit, cursor);
+    }
+
+    private MatchPage readJobMatchPage(String jobId, int limit, CursorState cursor) {
+        return readMatchPage(Filters.eq("jobId", jobId), limit, cursor);
+    }
+
+    private MatchPage readMatchPage(Bson baseFilter, int limit, CursorState cursor) {
+        List<Bson> filters = new ArrayList<>();
+        filters.add(baseFilter);
+        if (cursor != null) {
+            filters.add(Filters.or(
+                    Filters.lt("compositeScore", cursor.afterScore()),
+                    Filters.and(
+                            Filters.eq("compositeScore", cursor.afterScore()),
+                            Filters.gt("_id", cursor.afterObjectId()))));
+        }
+
+        Bson query = filters.size() == 1 ? filters.getFirst() : Filters.and(filters);
+        List<Document> items = new ArrayList<>();
+        matchesCollection.find(query)
+                .sort(Sorts.orderBy(
+                        Sorts.descending("compositeScore"),
+                        Sorts.ascending("_id")))
+                .limit(limit + 1)
+                .forEach(doc -> items.add(toResponseDocument(doc)));
+
+        MatchCursor nextCursor = null;
+        if (items.size() > limit) {
+            Document lastVisible = items.get(limit - 1);
+            nextCursor = new MatchCursor(lastVisible.getDouble("compositeScore"), lastVisible.getString("id"));
+            items = new ArrayList<>(items.subList(0, limit));
+        }
+        if (items.isEmpty()) {
+            return new MatchPage(items, null);
+        }
+
+        return new MatchPage(items, nextCursor);
+    }
+
+    private Document toResponseDocument(Document doc) {
+        Document response = new Document(doc);
+        ObjectId id = response.getObjectId("_id");
+        if (id != null) {
+            response.append("id", id.toHexString());
+            response.remove("_id");
+        }
+        return response;
+    }
+
+    private int validatePageSize(int limit) {
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be at least 1");
+        }
+        if (limit > MAX_PAGE_SIZE) {
+            throw new IllegalArgumentException("limit must be at most " + MAX_PAGE_SIZE);
+        }
+        return limit;
+    }
+
+    private ObjectId parseObjectId(String value, String fieldName) {
+        try {
+            return new ObjectId(value);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid ObjectId for " + fieldName + ": " + value);
+        }
+    }
+
+    private CursorState validateCursor(Double afterScore, String afterId) {
+        if (afterScore == null && afterId == null) {
+            return null;
+        }
+        if (afterScore == null || afterId == null) {
+            throw new IllegalArgumentException("afterScore and afterId must be provided together");
+        }
+        return new CursorState(afterScore, parseObjectId(afterId, "afterId"));
+    }
+
+    private static double compositeScoreOf(Document doc) {
+        return doc.getDouble("compositeScore") != null ? doc.getDouble("compositeScore") : 0.0;
+    }
+
+    private int safeCount(MongoCollection<Document> collection) {
+        long count = collection.countDocuments();
+        if (count <= 0) {
+            return 0;
+        }
+        return (int) Math.min(count, Integer.MAX_VALUE);
+    }
+
+    private record CursorState(double afterScore, ObjectId afterObjectId) {
     }
 }

@@ -141,13 +141,26 @@ export async function listJobs({ limit = 20, offset = 0 } = {}) {
 
 /**
  * Retrieve ranked job matches for a candidate.
- * Uses the stored embedding — no re-embedding on the server.
+ * Uses cursor-based pagination ordered by compositeScore desc and _id asc.
  *
  * @param {string} candidateId hex ObjectId string
- * @returns {Promise<Object[]>} ranked match results with vectorScore, skillOverlapScore, compositeScore
+ * @param {{ limit?: number, afterScore?: number, afterId?: string }} params pagination params
+ * @returns {Promise<{ items: Object[], nextCursor: { afterScore: number, afterId: string } | null }>}
  */
-export async function getMatchesForCandidate(candidateId) {
-  const res = await fetch(`${BASE_URL}/match/candidate/${candidateId}`);
+export async function getMatchesForCandidate(
+  candidateId,
+  { limit = 10, afterScore, afterId } = {},
+) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (afterScore != null || afterId != null) {
+    if (afterScore == null || afterId == null) {
+      throw new Error('afterScore and afterId must be provided together.');
+    }
+    query.set('afterScore', String(afterScore));
+    query.set('afterId', afterId);
+  }
+
+  const res = await fetch(`${BASE_URL}/match/candidate/${candidateId}?${query.toString()}`);
   return handleResponse(res);
 }
 
@@ -155,9 +168,22 @@ export async function getMatchesForCandidate(candidateId) {
  * Retrieve ranked candidate matches for a job posting.
  *
  * @param {string} jobId hex ObjectId string
- * @returns {Promise<Object[]>} ranked match results with vectorScore, skillOverlapScore, compositeScore
+ * @param {{ limit?: number, afterScore?: number, afterId?: string }} params pagination params
+ * @returns {Promise<{ items: Object[], nextCursor: { afterScore: number, afterId: string } | null }>}
  */
-export async function getMatchesForJob(jobId) {
-  const res = await fetch(`${BASE_URL}/match/job/${jobId}`);
+export async function getMatchesForJob(
+  jobId,
+  { limit = 10, afterScore, afterId } = {},
+) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (afterScore != null || afterId != null) {
+    if (afterScore == null || afterId == null) {
+      throw new Error('afterScore and afterId must be provided together.');
+    }
+    query.set('afterScore', String(afterScore));
+    query.set('afterId', afterId);
+  }
+
+  const res = await fetch(`${BASE_URL}/match/job/${jobId}?${query.toString()}`);
   return handleResponse(res);
 }

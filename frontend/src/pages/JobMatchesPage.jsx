@@ -5,12 +5,16 @@ import MatchCardSkeleton from '../components/MatchCardSkeleton';
 import CandidateDetailModal from '../components/CandidateDetailModal';
 import { getJob, getMatchesForJob } from '../api/client';
 
+const PAGE_SIZE = 10;
+
 export default function JobMatchesPage() {
   const { jobId } = useParams();
 
   const [job, setJob] = useState(null);
   const [matches, setMatches] = useState([]);
+  const [nextCursor, setNextCursor] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
   const [selectedMatch, setSelectedMatch] = useState(null);
 
@@ -23,17 +27,20 @@ export default function JobMatchesPage() {
       setLoading(true);
       setError(null);
       try {
-        const [jobDoc, matchDocs] = await Promise.all([
+        const [jobDoc, matchPage] = await Promise.all([
           getJob(jobId),
-          getMatchesForJob(jobId),
+          getMatchesForJob(jobId, { limit: PAGE_SIZE }),
         ]);
 
         if (cancelled) return;
         setJob(jobDoc);
-        setMatches(matchDocs);
+        setMatches(matchPage.items);
+        setNextCursor(matchPage.nextCursor);
       } catch (e) {
         if (cancelled) return;
         setError(e?.message ?? 'Failed to load matches.');
+        setMatches([]);
+        setNextCursor(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -45,6 +52,31 @@ export default function JobMatchesPage() {
       cancelled = true;
     };
   }, [jobId]);
+
+  async function handleLoadMore() {
+    if (!jobId || !nextCursor || loadingMore) return;
+
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const matchPage = await getMatchesForJob(jobId, {
+        limit: PAGE_SIZE,
+        afterScore: nextCursor.afterScore,
+        afterId: nextCursor.afterId,
+      });
+
+      setMatches((current) => {
+        const seen = new Set(current.map((match) => match.id));
+        const appended = matchPage.items.filter((match) => !seen.has(match.id));
+        return [...current, ...appended];
+      });
+      setNextCursor(matchPage.nextCursor);
+    } catch (e) {
+      setError(e?.message ?? 'Failed to load more matches.');
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-10 space-y-8">
@@ -107,7 +139,7 @@ export default function JobMatchesPage() {
         <div className="space-y-3">
           {matches.map((match, i) => (
             <MatchCard
-              key={match.candidateId ?? i}
+              key={match.id ?? match.candidateId ?? i}
               name={match.candidateName}
               email={match.candidateEmail}
               compositeScore={match.compositeScore}
@@ -118,6 +150,17 @@ export default function JobMatchesPage() {
               onClick={() => setSelectedMatch(match)}
             />
           ))}
+
+          {nextCursor && (
+            <button
+              type="button"
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm transition hover:border-gray-300 hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60"
+            >
+              {loadingMore ? 'Loading more matches...' : 'Load more'}
+            </button>
+          )}
         </div>
       )}
 
@@ -128,4 +171,3 @@ export default function JobMatchesPage() {
     </div>
   );
 }
-
