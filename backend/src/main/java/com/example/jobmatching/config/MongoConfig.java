@@ -38,7 +38,7 @@ public class MongoConfig {
     public MongoClient mongoClient() {
         MongoClientSettings settings = MongoClientSettings.builder()
             .applyConnectionString(new ConnectionString(mongoUri))
-            .applicationName("intelligent-job-matching")
+            .applicationName("devrel-tutorial-java-vector-search-llm-matching-foojay")
             .build();
         return MongoClients.create(settings);
     }
